@@ -32,7 +32,8 @@ What it does
    the trajectory start pose smoothly. The clock is only started AFTER
    ramp-in finishes, so ``elapsed = 0`` aligns with the first real
    trajectory sample (identical convention to rl_ik_solver/trajectory.py).
-5. Main loop at ``--control_frequency`` (default 100Hz):
+5. Main loop at ``--control_frequency`` (default 50 Hz to match the
+   TWIST2 training decimation and the rl_ik_solver baseline):
      - Sample target EE pose from the CSV at the current elapsed time.
      - Sample the precomputed q14 at the same time (same linear/
        wrap-aware interpolation).
@@ -69,7 +70,7 @@ Two terminals:
   source ~/miniconda3/bin/activate env_isaacgym
   python deploy_real/trajectory_replay_sim2sim.py \
       --trajectory_csv /home/rail/rail-unitree/rl_ik_solver/trajectory/recorded_trajectories/traj1.csv \
-      --control_frequency 100 \
+      --control_frequency 50 \
       --ramp_in_sec 2.0
 
 Dependencies
@@ -78,7 +79,7 @@ Dependencies
 * scipy (for SLSQP)
 * pinocchio (via rl_ik_solver's _import_pinocchio_safely helper)
 * redis (for IPC with the sim server)
-* loop_rate_limiters (same 100Hz rate limiter used by teleop)
+* loop_rate_limiters (same rate-limiter class used by teleop)
 """
 
 from __future__ import annotations
@@ -385,7 +386,7 @@ class TrajectoryReplaySim2Sim:
 
         Any value may be None if the corresponding Redis key is missing
         or cannot be parsed. The sim server publishes ``pd_target`` and
-        ``infer_ms`` once per policy tick (100 Hz) right next to the
+        ``infer_ms`` once per policy tick right next to the
         state; reading them in one pipeline minimises jitter.
         """
         self.redis_pipeline.get(K_STATE_BODY)
@@ -784,8 +785,14 @@ def parse_args() -> argparse.Namespace:
     )
     p.add_argument("--redis_port", type=int, default=6379)
     p.add_argument(
-        "--control_frequency", type=float, default=100.0,
-        help="Replay publish frequency; must match the sim server's policy_frequency.",
+        "--control_frequency", type=float, default=50.0,
+        help=(
+            "Replay publish frequency in Hz. Must match the sim server's "
+            "--policy_frequency. Default is 50 Hz to stay in-distribution "
+            "with the TWIST2 policy (training decimation is 50 Hz: "
+            "legged_gym humanoid_config.py has sim dt=0.005 * decimation=4) "
+            "and to match the rl_ik_solver baseline control_dt=0.02."
+        ),
     )
     p.add_argument(
         "--loop_trajectory", action="store_true",
