@@ -61,26 +61,26 @@ What it does
 
 Usage
 -----
-Two terminals, run from the TWIST2 repo root:
+Two terminals, run from the TWIST2 repo root. The shell wrappers do
+NOT activate any conda env -- activate the right one yourself first
+in each terminal.
 
-  # Terminal 1: start the MuJoCo + ONNX policy sim server at 50 Hz.
-  # This wrapper auto-activates the ``gmr`` conda env (which has
-  # mujoco + onnxruntime + torch + redis).
+  # Terminal 1: sim server (needs mujoco + onnxruntime + torch + redis).
+  conda activate gmr   # or whatever env has those deps on your host
   bash sim2sim_traj.sh
 
-  # Terminal 2: start the trajectory-replay driver that publishes
-  # mimic_obs to the server and logs tracking metrics. This wrapper
-  # auto-activates ``env_isaacgym`` (which has pinocchio + scipy +
-  # redis), defaults to --control_frequency 50 (matches Terminal 1),
-  # and uses the vendored sample CSV ``assets/trajectories/traj1.csv``.
+  # Terminal 2: trajectory-replay driver (needs pinocchio + scipy +
+  # redis + numpy). Defaults to --control_frequency 50 (matches
+  # Terminal 1) and uses the vendored sample CSV
+  # ``assets/trajectories/traj1.csv``.
+  conda activate env_isaacgym
   bash sim2sim_traj_replay.sh
 
-  # Custom trajectory / IK tuning (same shell just forwards extra
-  # flags to trajectory_replay_sim2sim.py via "$@"):
+  # Custom trajectory / IK tuning (the shell forwards extra flags to
+  # trajectory_replay_sim2sim.py via "$@"):
   TRAJECTORY_CSV=/path/to/your.csv bash sim2sim_traj_replay.sh --ramp_in_sec 2.0
 
-  # Or call python directly if you prefer manual env activation:
-  source ~/miniconda3/bin/activate env_isaacgym
+  # Or call python directly, skipping the wrapper:
   cd deploy_real
   python trajectory_replay_sim2sim.py \
       --trajectory_csv ../assets/trajectories/traj1.csv \

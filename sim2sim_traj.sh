@@ -1,18 +1,17 @@
 #!/usr/bin/env bash
-# Replay a recorded bimanual wrist EE trajectory through the TWIST2
-# sim2sim stack and report tracking metrics compatible with
-# rl_ik_solver/trajectory.py.
+# Terminal 1 of the TWIST2 trajectory-replay workflow: brings up the
+# MuJoCo + ONNX policy sim server (server_low_level_g1_sim.py) at the
+# policy's native 50 Hz frequency.
 #
-# Two-terminal workflow:
-#   1) This script OR ``bash sim2sim.sh`` first, to bring up the MuJoCo
-#      + ONNX policy server (server_low_level_g1_sim.py).
-#   2) In another terminal, run ``bash sim2sim_traj_replay.sh`` (or the
-#      explicit ``python ...trajectory_replay_sim2sim.py`` below) in an
-#      env that has pinocchio + scipy + redis (env_isaacgym works).
+# Prerequisite: activate a conda env that has
+#   mujoco + onnxruntime + torch + redis
+# BEFORE running this script. Example:
 #
-# This file only launches terminal (1); it is a wrapper around
-# sim2sim.sh that keeps the conda env activation explicit so the
-# replay side can document which env it needs separately.
+#   conda activate gmr
+#   bash sim2sim_traj.sh
+#
+# Terminal 2: in a separate shell, activate an env that has
+# pinocchio + scipy + redis, then run ``bash sim2sim_traj_replay.sh``.
 
 set -euo pipefail
 
@@ -24,12 +23,6 @@ XML_PATH=${XML_PATH:-${SCRIPT_DIR}/assets/g1/g1_sim2sim_29dof.xml}
 # control_dt=0.02 (g1_upper_ik.yaml), so the policy runs in-distribution
 # and the tracking / smoothness metrics are directly comparable.
 POLICY_FREQUENCY=${POLICY_FREQUENCY:-50}
-
-# Activate the env that has mujoco + onnxruntime + torch + redis. On
-# this workstation that env is ``gmr`` (same one teleop.sh uses).
-if [[ -z "${CONDA_DEFAULT_ENV:-}" || "${CONDA_DEFAULT_ENV}" != "gmr" ]]; then
-    source ~/miniconda3/bin/activate gmr
-fi
 
 cd "${SCRIPT_DIR}/deploy_real"
 
