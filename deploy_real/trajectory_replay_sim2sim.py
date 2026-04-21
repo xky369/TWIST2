@@ -61,17 +61,35 @@ What it does
 
 Usage
 -----
-Two terminals:
+Two terminals, run from the TWIST2 repo root:
 
-  # Terminal 1 (gmr env): start the TWIST2 sim policy server
-  bash sim2sim.sh
+  # Terminal 1: start the MuJoCo + ONNX policy sim server at 50 Hz.
+  # This wrapper auto-activates the ``gmr`` conda env (which has
+  # mujoco + onnxruntime + torch + redis).
+  bash sim2sim_traj.sh
 
-  # Terminal 2 (env_isaacgym env, has pinocchio): run this replay
+  # Terminal 2: start the trajectory-replay driver that publishes
+  # mimic_obs to the server and logs tracking metrics. This wrapper
+  # auto-activates ``env_isaacgym`` (which has pinocchio + scipy +
+  # redis), defaults to --control_frequency 50 (matches Terminal 1),
+  # and uses the vendored sample CSV ``assets/trajectories/traj1.csv``.
+  bash sim2sim_traj_replay.sh
+
+  # Custom trajectory / IK tuning (same shell just forwards extra
+  # flags to trajectory_replay_sim2sim.py via "$@"):
+  TRAJECTORY_CSV=/path/to/your.csv bash sim2sim_traj_replay.sh --ramp_in_sec 2.0
+
+  # Or call python directly if you prefer manual env activation:
   source ~/miniconda3/bin/activate env_isaacgym
-  python deploy_real/trajectory_replay_sim2sim.py \
-      --trajectory_csv /home/rail/rail-unitree/rl_ik_solver/trajectory/recorded_trajectories/traj1.csv \
+  cd deploy_real
+  python trajectory_replay_sim2sim.py \
+      --trajectory_csv ../assets/trajectories/traj1.csv \
       --control_frequency 50 \
       --ramp_in_sec 2.0
+
+Artifacts (JSON summary + NPZ trace + PNG figure) are written to
+``<TWIST2>/tracking_results/<csv_stem>_<timestamp>.*`` by default;
+override with ``--result_json``.
 
 Dependencies
 ------------
@@ -86,13 +104,20 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
 import time
 from datetime import datetime
 from pathlib import Path
 
 import numpy as np
 import redis
+
+
+# ``<TWIST2>/deploy_real/trajectory_replay_sim2sim.py`` -> parents[1] is <TWIST2>.
+# Every default path below is resolved relative to this so the repo is
+# self-contained (no hard-coded absolute paths into sibling repos).
+TWIST2_ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_TRAJECTORY_CSV = TWIST2_ROOT / "assets" / "trajectories" / "traj1.csv"
+DEFAULT_RESULTS_DIR = TWIST2_ROOT / "tracking_results"
 
 try:
     from loop_rate_limiters import RateLimiter as _ExternalRateLimiter
@@ -129,17 +154,15 @@ def _make_rate_limiter(frequency: float):
         return _ExternalRateLimiter(frequency=frequency, warn=False)
     return _FallbackRateLimiter(frequency=frequency)
 
-# Reuse the exact IK stack that rl_ik_solver's ik_benchmark uses, so the
-# joint reference we feed TWIST2 and the rl_ik_solver baseline see the
-# same kinematic model (torso_link reference, wrist_yaw_link EE).
-_RL_IK_SOLVER_IK_BENCH = Path(
-    "/home/rail/rail-unitree/rl_ik_solver/trajectory/ik_benchmark"
+# Reuse the exact IK stack that rl_ik_solver's ik_benchmark uses, so
+# the joint reference we feed TWIST2 and the rl_ik_solver baseline see
+# the same kinematic model (torso_link reference, wrist_yaw_link EE).
+# The three modules under ``ik_benchmark/`` are vendored copies of
+# rl_ik_solver/trajectory/ik_benchmark/*.py -- see ik_benchmark/__init__.py.
+from ik_benchmark import (  # type: ignore
+    Pose,
+    PinocchioDualArmSLSQPIKSolver,
 )
-if str(_RL_IK_SOLVER_IK_BENCH) not in sys.path:
-    sys.path.insert(0, str(_RL_IK_SOLVER_IK_BENCH))
-
-from g1_kinematics import Pose  # type: ignore
-from pinocchio_slsqp_solver import PinocchioDualArmSLSQPIKSolver  # type: ignore
 
 from tracking_metrics import (
     CommandSmoothnessMonitor,
@@ -647,15 +670,9 @@ class TrajectoryReplaySim2Sim:
     def _resolve_result_json_path(self) -> Path:
         if self.args.result_json:
             return Path(self.args.result_json).expanduser().resolve()
-        # Default: sibling folder to rl_ik_solver's tracking_results, but
-        # namespaced under twist2_tracking_results so the two methods
-        # don't overwrite each other when tested on the same CSV.
-        base = Path(
-            "/home/rail/rail-unitree/rl_ik_solver/trajectory/twist2_tracking_results"
-        )
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         csv_stem = Path(self.args.trajectory_csv).stem
-        return base / f"{csv_stem}_{ts}.json"
+        return DEFAULT_RESULTS_DIR / f"{csv_stem}_{ts}.json"
 
     def _build_result_summary(self) -> dict:
         elapsed = 0.0
@@ -755,9 +772,8 @@ class TrajectoryReplaySim2Sim:
 
     def _try_plot(self, trace_path: Path, figure_path: Path) -> None:
         try:
-            plot_module_dir = Path("/home/rail/rail-unitree/rl_ik_solver/trajectory")
-            if str(plot_module_dir) not in sys.path:
-                sys.path.insert(0, str(plot_module_dir))
+            # plot_tracking_trace.py sits next to this script under
+            # deploy_real/, vendored from rl_ik_solver/trajectory/.
             from plot_tracking_trace import plot_trace  # type: ignore
 
             plot_trace(trace_path, figure_path)
@@ -776,8 +792,12 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--trajectory_csv",
         type=str,
-        default="/home/rail/rail-unitree/rl_ik_solver/trajectory/recorded_trajectories/traj1.csv",
-        help="Bimanual wrist EE trajectory CSV (torso_link frame, 6D pos+RPY per hand).",
+        default=str(DEFAULT_TRAJECTORY_CSV),
+        help=(
+            "Bimanual wrist EE trajectory CSV (torso_link frame, 6D pos+RPY "
+            "per hand). Default is the vendored sample at "
+            "assets/trajectories/traj1.csv."
+        ),
     )
     p.add_argument(
         "--redis_ip", type=str, default="localhost",
@@ -834,7 +854,7 @@ def parse_args() -> argparse.Namespace:
         "--result_json", type=str, default="",
         help=(
             "Path to save the run-summary JSON. Default: "
-            "rl_ik_solver/trajectory/twist2_tracking_results/<csv_stem>_<ts>.json"
+            "<TWIST2>/tracking_results/<csv_stem>_<ts>.json"
         ),
     )
     p.add_argument("--disable_plot", action="store_true")

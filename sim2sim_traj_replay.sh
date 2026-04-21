@@ -12,7 +12,7 @@ set -euo pipefail
 
 SCRIPT_DIR=$(dirname "$(realpath "$0")")
 
-TRAJECTORY_CSV=${TRAJECTORY_CSV:-/home/rail/rail-unitree/rl_ik_solver/trajectory/recorded_trajectories/traj1.csv}
+TRAJECTORY_CSV=${TRAJECTORY_CSV:-${SCRIPT_DIR}/assets/trajectories/traj1.csv}
 # Must match the sim server's --policy_frequency (50 Hz by default in
 # sim2sim_traj.sh -- see the comment there for why).
 CONTROL_FREQUENCY=${CONTROL_FREQUENCY:-50}
