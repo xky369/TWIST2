@@ -263,13 +263,40 @@ class RealTimePolicyController(object):
                 assert obs_buf.shape[0] == self.total_obs_size, f"Expected {self.total_obs_size} obs, got {obs_buf.shape[0]}"
                 
                 obs_tensor = torch.from_numpy(obs_buf).float().unsqueeze(0).to(self.device)
+                # Time only the forward pass so the metric matches
+                # trajectory_replay_sim2sim.py / rl_ik_solver's
+                # session.run() measurement.
+                _t_infer_start = time.perf_counter()
                 with torch.no_grad():
                     raw_action = self.policy(obs_tensor).cpu().numpy().squeeze()
-                
+                infer_ms = (time.perf_counter() - _t_infer_start) * 1000.0
+
                 self.last_action = raw_action.copy()
 
                 raw_action = np.clip(raw_action, -10.0, 10.0)
                 target_dof_pos = self.default_dof_pos + raw_action * self.action_scale
+
+                # Publish the 29D policy PD target and the ONNX inference
+                # latency so trajectory_replay_sim2sim.py can compute
+                # smoothness and compute metrics identically to the sim
+                # path. Same keys / same semantics as server_low_level_g1_sim.py.
+                if self.redis_client is not None:
+                    try:
+                        self.redis_pipeline.set(
+                            "policy_pd_target_unitree_g1_with_hands",
+                            json.dumps(target_dof_pos.tolist()),
+                        )
+                        self.redis_pipeline.set(
+                            "policy_infer_ms_unitree_g1_with_hands",
+                            f"{float(infer_ms):.6f}",
+                        )
+                        self.redis_pipeline.set(
+                            "t_policy_unitree_g1_with_hands",
+                            int(time.time() * 1000),
+                        )
+                        self.redis_pipeline.execute()
+                    except Exception as _redis_pub_err:
+                        print(f"[real-server] redis publish pd_target failed: {_redis_pub_err}")
 
                 # self.redis_client.set("action_low_level_unitree_g1", json.dumps(raw_action.tolist()))
 
